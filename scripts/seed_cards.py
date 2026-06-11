@@ -106,7 +106,7 @@ async def upsert_cards(pool: asyncpg.Pool, rows: list[tuple]):
 async def main():
     tcgdex = TCGdex("en")  # English locale
 
-    pool = await asyncpg.create_pool(DATABASE_URL)
+    pool = await asyncpg.create_pool(DATABASE_URL, ssl = "require")
     sem = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)
 
     try:
