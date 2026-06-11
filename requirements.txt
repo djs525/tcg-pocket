@@ -1,0 +1,3 @@
+tcgdex-sdk
+asyncpg
+python-dotenv
