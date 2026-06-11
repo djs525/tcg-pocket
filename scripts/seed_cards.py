@@ -4,7 +4,6 @@ Asynchronously fetches all cards from the 'tcgp' (Pokémon TCG Pocket) series
 and upserts them into the `cards` table.
 """
 
-from IPython.core import getipython
 import asyncio
 import os
 import logging
@@ -12,7 +11,7 @@ import logging
 import asyncpg
 from dotenv import load_dotenv
 # pyrefly: ignore [missing-import]
-from tcgdexsdk import TCGdex, Extension
+from tcgdexsdk import TCGdex
 
 load_dotenv()
 
@@ -34,7 +33,7 @@ async def fetch_set_card_ids(tcgdex: TCGdex, set_id: str) -> list[str]:
     set_data = await tcgdex.set.get(set_id)
     return [c.id for c in set_data.cards]
 
-async def fetch_card_detail(tcgdex: TCGdex, card_id: str, sem: asyncio.Semaphore) -> list[str]:
+async def fetch_card_detail(tcgdex: TCGdex, card_id: str, sem: asyncio.Semaphore):
     """Fetch full card detail, respecting the concurrency semaphore."""
     async with sem:
         try:
@@ -50,12 +49,12 @@ def map_to_card_row(card) -> tuple | None:
     """
     if not card:
         return None
-    
+
     # supertype: TCGdex categorizes cards via `card.category`
-    # Expected values roughly: 'Pokemon', 'Trainer', 'Energy'
+    # Expected values: 'Pokemon', 'Trainer'
     supertype = getattr(card, "category", None) or "Unknown"
 
-    # Pokémon-specific fields are absent on Trainer/Energy cards.
+    # Pokémon-specific fields are absent on Trainer cards.
     hp = getattr(card, "hp", None)
 
     types = getattr(card, "types", None) or []
@@ -72,15 +71,24 @@ def map_to_card_row(card) -> tuple | None:
     if image_url:
         image_url = f"{image_url}/high.webp"
 
+    # Subtype for Trainer cards: 'Item', 'Supporter', 'Tool', etc.
+    # None for Pokémon cards.
+    trainer_subtype = getattr(card, "trainerType", None)
+
+    # Trainer cards use `effect`; Pokémon cards use `description`.
+    effect_text = getattr(card, "effect", None) or getattr(card, "description", None)
+
     return (
-        card.id,           # card_id
-        card.name,         # name
-        supertype,         # supertype
-        hp,                # hp
-        pokemon_type,      # pokemon_type
-        weakness_type,     # weakness_type
-        retreat_cost,      # retreat_cost
-        image_url,         # image_url
+        card.id,            # card_id
+        card.name,          # name
+        supertype,          # supertype
+        hp,                 # hp
+        pokemon_type,       # pokemon_type
+        weakness_type,      # weakness_type
+        retreat_cost,       # retreat_cost
+        image_url,          # image_url
+        trainer_subtype,    # trainer_subtype
+        effect_text,        # effect_text
     )
 
 async def upsert_cards(pool: asyncpg.Pool, rows: list[tuple]):
@@ -88,9 +96,10 @@ async def upsert_cards(pool: asyncpg.Pool, rows: list[tuple]):
     query = """
         INSERT INTO cards (
             card_id, name, supertype, hp, pokemon_type,
-            weakness_type, retreat_cost, image_url
+            weakness_type, retreat_cost, image_url,
+            trainer_subtype, effect_text
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         ON CONFLICT (card_id) DO UPDATE SET
             name = EXCLUDED.name,
             supertype = EXCLUDED.supertype,
@@ -98,7 +107,9 @@ async def upsert_cards(pool: asyncpg.Pool, rows: list[tuple]):
             pokemon_type = EXCLUDED.pokemon_type,
             weakness_type = EXCLUDED.weakness_type,
             retreat_cost = EXCLUDED.retreat_cost,
-            image_url = EXCLUDED.image_url;
+            image_url = EXCLUDED.image_url,
+            trainer_subtype = EXCLUDED.trainer_subtype,
+            effect_text = EXCLUDED.effect_text;
     """
     async with pool.acquire() as conn:
         await conn.executemany(query, rows)
@@ -106,7 +117,7 @@ async def upsert_cards(pool: asyncpg.Pool, rows: list[tuple]):
 async def main():
     tcgdex = TCGdex("en")  # English locale
 
-    pool = await asyncpg.create_pool(DATABASE_URL, ssl = "require")
+    pool = await asyncpg.create_pool(DATABASE_URL, statement_cache_size=0)
     sem = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)
 
     try:
@@ -124,7 +135,7 @@ async def main():
         tasks = [fetch_card_detail(tcgdex, cid, sem) for cid in all_card_ids]
         cards = await asyncio.gather(*tasks)
 
-        rows = [r for r in (map_card_to_row(c) for c in cards) if r is not None]
+        rows = [r for r in (map_to_card_row(c) for c in cards) if r is not None]
         log.info(f"Mapped {len(rows)} valid card rows")
 
         await upsert_cards(pool, rows)
