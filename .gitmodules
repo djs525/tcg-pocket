@@ -1,0 +1,3 @@
+[submodule "pokemon-cards"]
+	path = pokemon-cards
+	url = https://github.com/chase-mew/pokemon-tcg-pocket-cards.git
