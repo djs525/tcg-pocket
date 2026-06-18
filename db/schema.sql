@@ -79,3 +79,16 @@ CREATE TABLE IF NOT EXISTS simulated_states (
     win_probability_a   NUMERIC(5,2) NOT NULL,           -- P(A wins) at this turn (0.00–100.00)
     last_updated        TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+-- ─────────────────────────────────────────────────────────────────────
+-- TABLE: archetype_tech_cards
+-- Added in v1.2.0 Pivot (Task 3.4). Tracks Jaccard flex slots.
+-- ─────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS archetype_tech_cards (
+    archetype_id    INTEGER     NOT NULL REFERENCES archetypes(archetype_id) ON DELETE CASCADE,
+    card_id         VARCHAR(50) NOT NULL REFERENCES cards(card_id) ON DELETE CASCADE,
+    is_core         BOOLEAN     NOT NULL,   -- TRUE = present in ≥80% of lists
+    frequency       NUMERIC(5,2) NOT NULL,  -- % of scraped lists including this card
+    last_updated    TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (archetype_id, card_id)
+);
