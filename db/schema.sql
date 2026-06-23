@@ -92,3 +92,40 @@ CREATE TABLE IF NOT EXISTS archetype_tech_cards (
     last_updated    TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (archetype_id, card_id)
 );
+
+-- Schema Migration: v1.2.0 → v1.3.0
+-- Pokémon TCG Pocket Meta Analyzer
+-- Safe to re-run: all statements use IF NOT EXISTS / DO NOTHING patterns.
+--
+-- What changed:
+--   1. Unique index on simulated_states (archetype_a_id, archetype_b_id, turn_number)
+--      Required by the ON CONFLICT UPSERT in compile_matchup_matrix.py.
+--      Without this index, re-running the matrix pipeline inserts duplicate rows
+--      per (A, B, turn) combination, corrupting the turn-probability curve.
+--
+--   2. primary_attacker_is_ex column on archetypes
+--      Allows non-ex archetypes (Weezing stall, Greninja, etc.) to award 1 prize
+--      point on KO instead of 2. Defaults to TRUE so existing rows are unaffected.
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 1. Unique index for simulated_states UPSERT
+-- ─────────────────────────────────────────────────────────────────────────────
+CREATE UNIQUE INDEX IF NOT EXISTS uq_simulated_states
+    ON simulated_states (archetype_a_id, archetype_b_id, turn_number);
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 2. primary_attacker_is_ex on archetypes
+-- ─────────────────────────────────────────────────────────────────────────────
+ALTER TABLE archetypes
+    ADD COLUMN IF NOT EXISTS primary_attacker_is_ex BOOLEAN NOT NULL DEFAULT TRUE;
+
+-- Update known non-ex archetypes after running this migration.
+-- Example (fill in real archetype names from your archetypes table):
+--
+-- UPDATE archetypes SET primary_attacker_is_ex = FALSE
+--  WHERE name IN (
+--      'Weezing Stall',
+--      'Greninja',
+--      'Gyarados'
+--      -- add others as needed
+--  );
